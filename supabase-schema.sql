@@ -1,0 +1,574 @@
+-- Chatrist Database Schema
+-- User-scoped: Each table is scoped directly by user_id
+-- Run this in Supabase Dashboard → SQL Editor → New Query → Run
+
+-- ============================================
+-- EXTENSIONS
+-- ============================================
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- ============================================
+-- DROP EXISTING (for fresh install)
+-- ============================================
+DROP TABLE IF EXISTS rate_limit_counters CASCADE;
+DROP TABLE IF EXISTS campaign_analytics CASCADE;
+DROP TABLE IF EXISTS messages CASCADE;
+DROP TABLE IF EXISTS triggers CASCADE;
+DROP TABLE IF EXISTS leads CASCADE;
+DROP TABLE IF EXISTS campaigns CASCADE;
+DROP TABLE IF EXISTS flows CASCADE;
+DROP TABLE IF EXISTS instagram_accounts CASCADE;
+DROP TABLE IF EXISTS user_profiles CASCADE;
+
+DROP TYPE IF EXISTS campaign_status CASCADE;
+DROP TYPE IF EXISTS trigger_type CASCADE;
+DROP TYPE IF EXISTS trigger_status CASCADE;
+DROP TYPE IF EXISTS message_type CASCADE;
+DROP TYPE IF EXISTS message_status CASCADE;
+
+-- ============================================
+-- ENUMS
+-- ============================================
+CREATE TYPE campaign_status AS ENUM ('DRAFT', 'ACTIVE', 'PAUSED', 'COMPLETED', 'ARCHIVED');
+CREATE TYPE trigger_type AS ENUM ('COMMENT', 'STORY_REPLY', 'DM_KEYWORD', 'NEW_FOLLOWER');
+CREATE TYPE trigger_status AS ENUM ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'SKIPPED');
+CREATE TYPE message_type AS ENUM ('TEXT', 'BUTTON', 'LINK', 'IMAGE');
+CREATE TYPE message_status AS ENUM ('QUEUED', 'SENDING', 'SENT', 'DELIVERED', 'FAILED');
+
+-- ============================================
+-- TABLES
+-- ============================================
+
+-- User Profiles (auth user extension)
+CREATE TABLE user_profiles (
+  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  name text,
+  username text UNIQUE,
+  avatar_url text,
+  timezone text DEFAULT 'UTC',
+  language text DEFAULT 'en',
+  notification_preferences jsonb DEFAULT '{"emailNotifications": true, "campaignAlerts": true, "weeklyReports": false, "monthlyReports": true, "dmUpdates": true, "newFeatures": false}'::jsonb,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT valid_username CHECK (
+    username IS NULL OR (
+      username ~ '^[a-z0-9_]{3,30}$'
+      AND username NOT IN (
+        'admin', 'api', 'app', 'auth', 'blog', 'dashboard', 'help',
+        'login', 'logout', 'profile', 'register', 'settings', 'support',
+        'www', 'chatrist', 'about', 'contact', 'terms', 'privacy',
+        'pricing', 'features', 'docs', 'status', 'null', 'undefined'
+      )
+    )
+  )
+);
+
+-- Instagram Accounts (scoped to user)
+CREATE TABLE instagram_accounts (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  ig_user_id text NOT NULL,
+  username text NOT NULL,
+  name text,
+  profile_pic_url text,
+  profile_picture_url text,
+  access_token text,
+  token_expiry timestamptz,
+  is_active boolean DEFAULT true,
+  last_synced_at timestamptz,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE(ig_user_id)
+);
+
+-- Flows (scoped to user)
+CREATE TABLE flows (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
+  name text NOT NULL CHECK (char_length(name) >= 1 AND char_length(name) <= 100),
+  description text CHECK (description IS NULL OR char_length(description) <= 500),
+  nodes jsonb NOT NULL DEFAULT '[]'::jsonb,
+  edges jsonb NOT NULL DEFAULT '[]'::jsonb,
+  is_template boolean DEFAULT false,
+  is_valid boolean DEFAULT false,
+  validation_errors jsonb DEFAULT '[]'::jsonb,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+-- Campaigns (scoped to user)
+CREATE TABLE campaigns (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  instagram_account_id uuid REFERENCES instagram_accounts(id) ON DELETE SET NULL,
+  name text NOT NULL CHECK (char_length(name) >= 1 AND char_length(name) <= 100),
+  description text CHECK (description IS NULL OR char_length(description) <= 500),
+  status campaign_status DEFAULT 'DRAFT',
+  trigger_type trigger_type NOT NULL,
+  trigger_config jsonb DEFAULT '{}'::jsonb,
+  flow_id uuid REFERENCES flows(id) ON DELETE SET NULL,
+  hourly_limit int DEFAULT 20 CHECK (hourly_limit >= 1 AND hourly_limit <= 50),
+  daily_limit int DEFAULT 100 CHECK (daily_limit >= 1 AND daily_limit <= 500),
+  hourly_count int DEFAULT 0,
+  daily_count int DEFAULT 0,
+  starts_at timestamptz,
+  ends_at timestamptz,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CHECK (hourly_limit <= daily_limit),
+  CHECK (ends_at IS NULL OR starts_at IS NULL OR ends_at > starts_at)
+);
+
+-- Leads (scoped to user)
+CREATE TABLE leads (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  ig_user_id text NOT NULL,
+  ig_username text NOT NULL,
+  email text CHECK (email IS NULL OR email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
+  phone text CHECK (phone IS NULL OR char_length(phone) <= 20),
+  name text,
+  custom_fields jsonb DEFAULT '{}'::jsonb,
+  tags text[] DEFAULT ARRAY[]::text[],
+  source text,
+  source_campaign_id uuid REFERENCES campaigns(id) ON DELETE SET NULL,
+  first_interaction_at timestamptz DEFAULT now(),
+  last_interaction_at timestamptz DEFAULT now(),
+  total_interactions int DEFAULT 1,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE(user_id, ig_user_id)
+);
+
+-- Triggers (scoped via campaign -> user)
+CREATE TABLE triggers (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  campaign_id uuid REFERENCES campaigns(id) ON DELETE CASCADE NOT NULL,
+  lead_id uuid REFERENCES leads(id) ON DELETE SET NULL,
+  ig_user_id text NOT NULL,
+  ig_username text NOT NULL,
+  type trigger_type NOT NULL,
+  source_id text,
+  source_text text,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  status trigger_status DEFAULT 'PENDING',
+  processed_at timestamptz,
+  error_message text,
+  retry_count int DEFAULT 0,
+  next_retry_at timestamptz,
+  current_node_id text,
+  flow_state jsonb DEFAULT '{}'::jsonb,
+  created_at timestamptz DEFAULT now()
+);
+
+-- Messages (scoped via campaign -> user)
+CREATE TABLE messages (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  trigger_id uuid REFERENCES triggers(id) ON DELETE CASCADE NOT NULL,
+  campaign_id uuid REFERENCES campaigns(id) ON DELETE CASCADE NOT NULL,
+  ig_user_id text NOT NULL,
+  content text NOT NULL CHECK (char_length(content) <= 1000),
+  message_type message_type NOT NULL,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  status message_status DEFAULT 'QUEUED',
+  sent_at timestamptz,
+  delivered_at timestamptz,
+  error_message text,
+  retry_count int DEFAULT 0,
+  ig_message_id text,
+  created_at timestamptz DEFAULT now()
+);
+
+-- Campaign Analytics (scoped via campaign -> user)
+CREATE TABLE campaign_analytics (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  campaign_id uuid REFERENCES campaigns(id) ON DELETE CASCADE NOT NULL,
+  date date NOT NULL,
+  trigger_count int DEFAULT 0,
+  dms_sent int DEFAULT 0,
+  dms_delivered int DEFAULT 0,
+  dms_failed int DEFAULT 0,
+  replies int DEFAULT 0,
+  button_clicks int DEFAULT 0,
+  link_clicks int DEFAULT 0,
+  emails_captured int DEFAULT 0,
+  flow_completions int DEFAULT 0,
+  flow_dropoffs int DEFAULT 0,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE(campaign_id, date)
+);
+
+-- Rate Limit Counters (scoped via campaign -> user)
+CREATE TABLE rate_limit_counters (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  campaign_id uuid REFERENCES campaigns(id) ON DELETE CASCADE NOT NULL,
+  window_start timestamptz NOT NULL,
+  window_type text NOT NULL CHECK (window_type IN ('minute', 'hour', 'day')),
+  count int DEFAULT 0,
+  UNIQUE(campaign_id, window_start, window_type)
+);
+
+-- ============================================
+-- INDEXES
+-- ============================================
+CREATE INDEX idx_user_profiles_username ON user_profiles(username);
+CREATE INDEX idx_instagram_accounts_user_id ON instagram_accounts(user_id);
+CREATE INDEX idx_instagram_accounts_ig_user_id ON instagram_accounts(ig_user_id);
+CREATE INDEX idx_flows_user_id ON flows(user_id);
+CREATE INDEX idx_flows_is_template ON flows(is_template) WHERE is_template = true;
+CREATE INDEX idx_campaigns_user_id ON campaigns(user_id);
+CREATE INDEX idx_campaigns_status ON campaigns(status);
+CREATE INDEX idx_campaigns_active ON campaigns(status) WHERE status = 'ACTIVE';
+CREATE INDEX idx_leads_user_id ON leads(user_id);
+CREATE INDEX idx_leads_tags ON leads USING gin(tags);
+CREATE INDEX idx_leads_ig_username ON leads(ig_username);
+CREATE INDEX idx_triggers_campaign_id ON triggers(campaign_id);
+CREATE INDEX idx_triggers_status ON triggers(status);
+CREATE INDEX idx_triggers_pending ON triggers(status, created_at) WHERE status = 'PENDING';
+CREATE INDEX idx_messages_campaign_id ON messages(campaign_id);
+CREATE INDEX idx_messages_status ON messages(status);
+CREATE INDEX idx_campaign_analytics_campaign_date ON campaign_analytics(campaign_id, date);
+
+-- ============================================
+-- ROW LEVEL SECURITY
+-- ============================================
+ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE instagram_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE flows ENABLE ROW LEVEL SECURITY;
+ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE triggers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE campaign_analytics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rate_limit_counters ENABLE ROW LEVEL SECURITY;
+
+-- User Profiles: users can only access their own profile
+CREATE POLICY "users_own_profile_select" ON user_profiles FOR SELECT USING (auth.uid() = id);
+CREATE POLICY "users_own_profile_update" ON user_profiles FOR UPDATE USING (auth.uid() = id);
+CREATE POLICY "users_own_profile_delete" ON user_profiles FOR DELETE USING (auth.uid() = id);
+-- Allow service role to insert (for trigger function)
+CREATE POLICY "service_insert_profile" ON user_profiles FOR INSERT WITH CHECK (true);
+
+-- Instagram Accounts: users can only access their own accounts
+CREATE POLICY "users_own_instagram" ON instagram_accounts FOR ALL USING (auth.uid() = user_id);
+
+-- Flows: users can access their own flows or templates
+CREATE POLICY "users_own_flows" ON flows FOR ALL USING (
+  is_template = true OR auth.uid() = user_id
+);
+
+-- Campaigns: users can only access their own campaigns
+CREATE POLICY "users_own_campaigns" ON campaigns FOR ALL USING (auth.uid() = user_id);
+
+-- Leads: users can only access their own leads
+CREATE POLICY "users_own_leads" ON leads FOR ALL USING (auth.uid() = user_id);
+
+-- Triggers: access via campaign ownership
+CREATE POLICY "users_own_triggers" ON triggers FOR ALL USING (
+  EXISTS (
+    SELECT 1 FROM campaigns
+    WHERE campaigns.id = triggers.campaign_id AND campaigns.user_id = auth.uid()
+  )
+);
+
+-- Messages: access via campaign ownership
+CREATE POLICY "users_own_messages" ON messages FOR ALL USING (
+  EXISTS (
+    SELECT 1 FROM campaigns
+    WHERE campaigns.id = messages.campaign_id AND campaigns.user_id = auth.uid()
+  )
+);
+
+-- Analytics: access via campaign ownership
+CREATE POLICY "users_own_analytics" ON campaign_analytics FOR ALL USING (
+  EXISTS (
+    SELECT 1 FROM campaigns
+    WHERE campaigns.id = campaign_analytics.campaign_id AND campaigns.user_id = auth.uid()
+  )
+);
+
+-- Rate Limits: access via campaign ownership
+CREATE POLICY "users_own_rate_limits" ON rate_limit_counters FOR ALL USING (
+  EXISTS (
+    SELECT 1 FROM campaigns
+    WHERE campaigns.id = rate_limit_counters.campaign_id AND campaigns.user_id = auth.uid()
+  )
+);
+
+-- ============================================
+-- FUNCTIONS
+-- ============================================
+
+-- Auto-update updated_at
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Generate unique username from name
+CREATE OR REPLACE FUNCTION generate_username(base_name text)
+RETURNS text AS $$
+DECLARE
+  generated_username text;
+  suffix text;
+  counter int := 0;
+BEGIN
+  -- Clean name: lowercase, replace spaces with underscores, remove special chars
+  generated_username := lower(regexp_replace(COALESCE(base_name, 'user'), '[^a-z0-9]', '_', 'g'));
+  -- Remove consecutive underscores and trim
+  generated_username := regexp_replace(generated_username, '_+', '_', 'g');
+  generated_username := trim(both '_' from generated_username);
+  -- Ensure minimum length
+  IF length(generated_username) < 3 THEN
+    generated_username := 'user_' || generated_username;
+  END IF;
+  -- Truncate to leave room for suffix
+  generated_username := left(generated_username, 24);
+
+  -- Check if username exists, if so add random suffix
+  WHILE EXISTS (SELECT 1 FROM user_profiles WHERE username = generated_username) LOOP
+    suffix := substr(md5(random()::text), 1, 5);
+    generated_username := left(generated_username, 24) || '_' || suffix;
+    counter := counter + 1;
+    IF counter > 10 THEN
+      -- Fallback to full random
+      generated_username := 'user_' || substr(md5(random()::text), 1, 20);
+      EXIT;
+    END IF;
+  END LOOP;
+
+  RETURN generated_username;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create user profile on signup
+CREATE OR REPLACE FUNCTION handle_new_user()
+RETURNS TRIGGER AS $$
+DECLARE
+  new_username text;
+BEGIN
+  -- Generate username from name or email
+  new_username := generate_username(
+    COALESCE(
+      NEW.raw_user_meta_data->>'username',
+      NEW.raw_user_meta_data->>'name',
+      split_part(NEW.email, '@', 1)
+    )
+  );
+
+  INSERT INTO user_profiles (id, name, username)
+  VALUES (NEW.id, NEW.raw_user_meta_data->>'name', new_username)
+  ON CONFLICT (id) DO UPDATE SET
+    username = COALESCE(user_profiles.username, EXCLUDED.username);
+
+  -- Update user metadata with username for middleware access
+  UPDATE auth.users
+  SET raw_user_meta_data = raw_user_meta_data || jsonb_build_object('username', new_username)
+  WHERE id = NEW.id AND (raw_user_meta_data->>'username') IS NULL;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Validate flow structure
+CREATE OR REPLACE FUNCTION validate_flow()
+RETURNS TRIGGER AS $$
+DECLARE
+  node_count int;
+  has_end boolean := false;
+  errors jsonb := '[]'::jsonb;
+BEGIN
+  node_count := jsonb_array_length(NEW.nodes);
+
+  IF node_count > 50 THEN
+    errors := errors || '["Maximum 50 nodes allowed"]'::jsonb;
+  END IF;
+
+  IF jsonb_array_length(NEW.edges) > 100 THEN
+    errors := errors || '["Maximum 100 connections allowed"]'::jsonb;
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM jsonb_array_elements(NEW.nodes) AS n
+    WHERE n->>'type' = 'end'
+  ) INTO has_end;
+
+  IF node_count > 0 AND NOT has_end THEN
+    errors := errors || '["Flow must have at least one end node"]'::jsonb;
+  END IF;
+
+  NEW.validation_errors := errors;
+  NEW.is_valid := jsonb_array_length(errors) = 0;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Check if campaign can be activated
+CREATE OR REPLACE FUNCTION can_activate_campaign(campaign_id uuid)
+RETURNS jsonb AS $$
+DECLARE
+  c record;
+  errors jsonb := '[]'::jsonb;
+BEGIN
+  SELECT
+    campaigns.*,
+    flows.is_valid AS flow_valid,
+    instagram_accounts.is_active AS ig_active
+  INTO c
+  FROM campaigns
+  LEFT JOIN flows ON flows.id = campaigns.flow_id
+  LEFT JOIN instagram_accounts ON instagram_accounts.id = campaigns.instagram_account_id
+  WHERE campaigns.id = can_activate_campaign.campaign_id;
+
+  IF c IS NULL THEN
+    RETURN '{"can_activate": false, "errors": ["Campaign not found"]}'::jsonb;
+  END IF;
+
+  IF c.flow_id IS NULL THEN
+    errors := errors || '["Flow is required"]'::jsonb;
+  ELSIF NOT c.flow_valid THEN
+    errors := errors || '["Flow is invalid"]'::jsonb;
+  END IF;
+
+  IF c.instagram_account_id IS NULL THEN
+    errors := errors || '["Instagram account is required"]'::jsonb;
+  ELSIF NOT c.ig_active THEN
+    errors := errors || '["Instagram account is inactive"]'::jsonb;
+  END IF;
+
+  IF c.ends_at IS NOT NULL AND c.ends_at < now() THEN
+    errors := errors || '["End date has passed"]'::jsonb;
+  END IF;
+
+  RETURN jsonb_build_object('can_activate', jsonb_array_length(errors) = 0, 'errors', errors);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Check rate limit
+CREATE OR REPLACE FUNCTION check_rate_limit(p_campaign_id uuid)
+RETURNS jsonb AS $$
+DECLARE
+  c record;
+  hour_count int;
+  day_count int;
+BEGIN
+  SELECT hourly_limit, daily_limit INTO c FROM campaigns WHERE id = p_campaign_id;
+
+  IF c IS NULL THEN
+    RETURN '{"allowed": false, "reason": "Campaign not found"}'::jsonb;
+  END IF;
+
+  SELECT COALESCE(SUM(count), 0) INTO hour_count
+  FROM rate_limit_counters
+  WHERE campaign_id = p_campaign_id AND window_type = 'hour' AND window_start = date_trunc('hour', now());
+
+  SELECT COALESCE(SUM(count), 0) INTO day_count
+  FROM rate_limit_counters
+  WHERE campaign_id = p_campaign_id AND window_type = 'day' AND window_start = date_trunc('day', now());
+
+  IF hour_count >= c.hourly_limit THEN
+    RETURN '{"allowed": false, "reason": "Hourly limit reached"}'::jsonb;
+  END IF;
+
+  IF day_count >= c.daily_limit THEN
+    RETURN '{"allowed": false, "reason": "Daily limit reached"}'::jsonb;
+  END IF;
+
+  RETURN '{"allowed": true}'::jsonb;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Increment rate limit
+CREATE OR REPLACE FUNCTION increment_rate_limit(p_campaign_id uuid)
+RETURNS void AS $$
+BEGIN
+  INSERT INTO rate_limit_counters (campaign_id, window_start, window_type, count)
+  VALUES (p_campaign_id, date_trunc('hour', now()), 'hour', 1)
+  ON CONFLICT (campaign_id, window_start, window_type) DO UPDATE SET count = rate_limit_counters.count + 1;
+
+  INSERT INTO rate_limit_counters (campaign_id, window_start, window_type, count)
+  VALUES (p_campaign_id, date_trunc('day', now()), 'day', 1)
+  ON CONFLICT (campaign_id, window_start, window_type) DO UPDATE SET count = rate_limit_counters.count + 1;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================
+-- TRIGGERS
+-- ============================================
+CREATE TRIGGER update_user_profiles_timestamp BEFORE UPDATE ON user_profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+CREATE TRIGGER update_instagram_accounts_timestamp BEFORE UPDATE ON instagram_accounts FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+CREATE TRIGGER update_flows_timestamp BEFORE UPDATE ON flows FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+CREATE TRIGGER update_campaigns_timestamp BEFORE UPDATE ON campaigns FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+CREATE TRIGGER update_leads_timestamp BEFORE UPDATE ON leads FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+CREATE TRIGGER update_analytics_timestamp BEFORE UPDATE ON campaign_analytics FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER validate_flow_trigger BEFORE INSERT OR UPDATE OF nodes, edges ON flows FOR EACH ROW EXECUTE FUNCTION validate_flow();
+
+CREATE TRIGGER on_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+
+-- ============================================
+-- PUBLIC PROFILES (Linktree-style pages)
+-- ============================================
+
+CREATE TABLE public_profiles (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL UNIQUE,
+  username text NOT NULL UNIQUE,
+  display_name text,
+  bio text CHECK (bio IS NULL OR char_length(bio) <= 500),
+  avatar_url text,
+  links jsonb NOT NULL DEFAULT '[]'::jsonb,
+  theme jsonb NOT NULL DEFAULT '{"primaryColor": "#6366f1", "backgroundColor": "#ffffff", "textColor": "#0f172a", "buttonStyle": "rounded", "font": "Inter"}'::jsonb,
+  is_published boolean DEFAULT false,
+  seo_title text CHECK (seo_title IS NULL OR char_length(seo_title) <= 60),
+  seo_description text CHECK (seo_description IS NULL OR char_length(seo_description) <= 160),
+  view_count integer DEFAULT 0,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT valid_username CHECK (
+    username ~ '^[a-z0-9_]{3,30}$'
+    AND username NOT IN (
+      'admin', 'api', 'app', 'auth', 'blog', 'dashboard', 'help',
+      'login', 'logout', 'profile', 'register', 'settings', 'support',
+      'www', 'chatrist', 'about', 'contact', 'terms', 'privacy',
+      'pricing', 'features', 'docs', 'status', 'null', 'undefined'
+    )
+  )
+);
+
+-- Indexes
+CREATE INDEX idx_public_profiles_user_id ON public_profiles(user_id);
+CREATE INDEX idx_public_profiles_username ON public_profiles(username);
+CREATE INDEX idx_public_profiles_published ON public_profiles(is_published) WHERE is_published = true;
+
+-- RLS
+ALTER TABLE public_profiles ENABLE ROW LEVEL SECURITY;
+
+-- Anyone can view published profiles (no auth required)
+CREATE POLICY "public_profiles_public_read" ON public_profiles
+  FOR SELECT USING (is_published = true);
+
+-- Owners can do everything with their own profile
+CREATE POLICY "public_profiles_owner_all" ON public_profiles
+  FOR ALL USING (auth.uid() = user_id);
+
+-- Increment view count (SECURITY DEFINER so it bypasses RLS)
+CREATE OR REPLACE FUNCTION increment_profile_view(p_username text)
+RETURNS void AS $$
+BEGIN
+  UPDATE public_profiles
+  SET view_count = view_count + 1
+  WHERE username = p_username AND is_published = true;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Auto-update timestamp
+CREATE TRIGGER update_public_profiles_timestamp
+  BEFORE UPDATE ON public_profiles
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();

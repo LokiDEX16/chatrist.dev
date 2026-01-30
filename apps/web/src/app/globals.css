@@ -1,0 +1,254 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Background (main): #F8FAFC */
+    --background: 210 40% 98%;
+    /* Primary text: #0F172A */
+    --foreground: 222 47% 11%;
+
+    /* Card / Surface: #FFFFFF */
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    /* Popover */
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Primary accent (buttons, links): Orange-500 */
+    --primary: 25 95% 53%;
+    --primary-foreground: 0 0% 100%;
+    /* Accent hover: Orange-600 */
+    --primary-hover: 25 95% 45%;
+
+    /* Secondary text: #475569 */
+    --secondary: 210 40% 98%;
+    --secondary-foreground: 215 16% 37%;
+
+    /* Muted - For disabled/subtle elements */
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    /* Accent - Light orange tint for active nav */
+    --accent: 33 100% 96%;
+    --accent-foreground: 25 95% 53%;
+
+    /* Destructive / Error: #EF4444 */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Success: #22C55E */
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+
+    /* Warning - For caution states */
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    /* Border / dividers: #CBD5E1 */
+    --border: 214 32% 85%;
+    --input: 214 32% 85%;
+    --ring: 25 95% 53%;
+
+    /* Radius - Larger for premium feel */
+    --radius: 0.75rem;
+
+    /* Sidebar */
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 222 47% 11%;
+  }
+
+  .dark {
+    /* Background - Rich dark, not pure black */
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+
+    /* Card - Slightly lighter than background */
+    --card: 222 47% 9%;
+    --card-foreground: 210 40% 98%;
+
+    /* Popover */
+    --popover: 222 47% 9%;
+    --popover-foreground: 210 40% 98%;
+
+    /* Primary - Orange accent */
+    --primary: 25 95% 53%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 25 95% 45%;
+
+    /* Secondary */
+    --secondary: 222 47% 12%;
+    --secondary-foreground: 215 16% 70%;
+
+    /* Muted */
+    --muted: 222 47% 12%;
+    --muted-foreground: 215 16% 55%;
+
+    /* Accent */
+    --accent: 25 95% 15%;
+    --accent-foreground: 25 95% 53%;
+
+    /* Destructive / Error */
+    --destructive: 0 84% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Success */
+    --success: 142 71% 35%;
+    --success-foreground: 0 0% 100%;
+
+    /* Warning */
+    --warning: 38 75% 40%;
+    --warning-foreground: 0 0% 100%;
+
+    /* Border */
+    --border: 222 47% 18%;
+    --input: 222 47% 18%;
+    --ring: 25 95% 53%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply antialiased;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Improved focus states for accessibility */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer components {
+  /* Page header styling */
+  .page-header {
+    @apply space-y-1;
+  }
+
+  .page-title {
+    @apply text-2xl font-semibold tracking-tight text-foreground;
+  }
+
+  .page-description {
+    @apply text-sm text-muted-foreground;
+  }
+
+  /* Stats card styling */
+  .stat-value {
+    @apply text-3xl font-semibold tracking-tight;
+  }
+
+  .stat-label {
+    @apply text-sm font-medium text-muted-foreground;
+  }
+
+  /* Brand gradient utilities */
+  .brand-gradient {
+    @apply bg-gradient-to-r from-orange-400 via-pink-500 to-violet-600;
+  }
+
+  .brand-gradient-text {
+    @apply bg-gradient-to-r from-orange-500 via-pink-500 to-violet-600 bg-clip-text text-transparent;
+  }
+
+  /* Empty state styling */
+  .empty-state {
+    @apply flex flex-col items-center justify-center py-12 text-center;
+  }
+
+  .empty-state-icon {
+    @apply h-12 w-12 text-muted-foreground/50 mb-4;
+  }
+
+  .empty-state-title {
+    @apply text-lg font-medium text-foreground mb-1;
+  }
+
+  .empty-state-description {
+    @apply text-sm text-muted-foreground max-w-sm;
+  }
+}
+
+/* Custom scrollbar styles - More subtle */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.2);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.35);
+}
+
+/* Flow builder specific styles */
+.react-flow__node {
+  @apply rounded-xl shadow-lg;
+}
+
+.react-flow__edge-path {
+  stroke-width: 2;
+}
+
+/* Animation utilities */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.2s ease-out;
+}

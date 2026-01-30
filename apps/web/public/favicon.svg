@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" width="180" height="180">
+  <!-- Background -->
+  <rect width="180" height="180" fill="#3B82F6" rx="40"/>
+  
+  <!-- Chat bubble design with C letter -->
+  <g transform="translate(45, 35)">
+    <!-- Large chat bubble -->
+    <path d="M 10 0 L 80 0 Q 90 0 90 10 L 90 60 Q 90 70 80 70 L 30 70 L 15 85 L 25 70 L 10 70 Q 0 70 0 60 L 0 10 Q 0 0 10 0 Z" fill="#FFFFFF" opacity="0.95"/>
+    
+    <!-- C letter inside bubble -->
+    <text x="45" y="52" font-size="48" font-weight="bold" fill="#3B82F6" text-anchor="middle" font-family="Arial, sans-serif">C</text>
+  </g>
+  
+  <!-- Small decorative chat bubble -->
+  <g transform="translate(100, 90)">
+    <circle cx="15" cy="15" r="15" fill="#60A5FA" opacity="0.8"/>
+  </g>
+</svg>
