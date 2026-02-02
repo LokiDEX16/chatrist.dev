@@ -56,7 +56,7 @@ const fadeInUp = {
 const getNavLinks = (username: string | null) => [
   { label: 'Features', href: '#features' },
   { label: 'How It Works', href: '#how-it-works' },
-  { label: 'Pricing', href: username ? `/${username}/plan` : '/login?redirect=/plan' },
+  { label: 'Pricing', href: '/pricing' },
   { label: 'Resources', href: '#resources' },
 ];
 
@@ -892,26 +892,26 @@ export default function LandingPage() {
               <ul className="space-y-3 text-sm">
                 <li><Link href="#features" className="hover:text-white transition-colors">Features</Link></li>
                 <li><Link href="#how-it-works" className="hover:text-white transition-colors">How It Works</Link></li>
-                <li><Link href={username ? `/${username}/plan` : '/login?redirect=/plan'} className="hover:text-white transition-colors">Pricing</Link></li>
+                <li><Link href="/pricing" className="hover:text-white transition-colors">Pricing</Link></li>
                 <li><Link href={username ? `/${username}/flows` : '/login?redirect=/flows'} className="hover:text-white transition-colors">Flow Builder</Link></li>
               </ul>
             </div>
             <div>
               <h4 className="text-sm font-semibold text-white uppercase tracking-wider mb-4">Resources</h4>
               <ul className="space-y-3 text-sm">
-                <li><Link href={username ? `/${username}/tutorials` : '/login?redirect=/tutorials'} className="hover:text-white transition-colors">Tutorials</Link></li>
-                <li><Link href="#" className="hover:text-white transition-colors">Documentation</Link></li>
-                <li><Link href="#" className="hover:text-white transition-colors">Blog</Link></li>
-                <li><Link href="#" className="hover:text-white transition-colors">Community</Link></li>
+                <li><Link href="/tutorials" className="hover:text-white transition-colors">Tutorials</Link></li>
+                <li><Link href="/documentation" className="hover:text-white transition-colors">Documentation</Link></li>
+                <li><Link href="/blog" className="hover:text-white transition-colors">Blog</Link></li>
+                <li><Link href="/community" className="hover:text-white transition-colors">Community</Link></li>
               </ul>
             </div>
             <div>
               <h4 className="text-sm font-semibold text-white uppercase tracking-wider mb-4">Company</h4>
               <ul className="space-y-3 text-sm">
-                <li><Link href="#" className="hover:text-white transition-colors">About</Link></li>
+                <li><Link href="/about" className="hover:text-white transition-colors">About</Link></li>
                 <li><Link href="/privacy" className="hover:text-white transition-colors">Privacy</Link></li>
                 <li><Link href="/terms" className="hover:text-white transition-colors">Terms</Link></li>
-                <li><Link href="#" className="hover:text-white transition-colors">Contact</Link></li>
+                <li><Link href="/contact" className="hover:text-white transition-colors">Contact</Link></li>
               </ul>
             </div>
           </div>
