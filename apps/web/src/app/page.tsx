@@ -13,7 +13,6 @@ import {
   ArrowRight,
   Instagram,
   Sparkles,
-  Users,
   CheckCircle2,
   MessageCircle,
   Mail,
@@ -22,12 +21,10 @@ import {
   Smartphone,
   TrendingUp,
   Target,
-  Award,
   BookOpen,
   Video,
   FileText,
   ChevronRight,
-  Star,
   Menu,
   X,
 } from 'lucide-react';
@@ -124,10 +121,10 @@ const integrations = [
 ];
 
 const stats = [
-  { value: '300%', label: 'Increase in response rate', description: 'Average across all users' },
-  { value: '21%', label: 'Higher engagement', description: 'Compared to manual outreach' },
-  { value: '30%', label: 'More leads captured', description: 'With automated DM flows' },
-  { value: '10x', label: 'Time saved weekly', description: 'On audience management' },
+  { value: '3x', label: 'Faster response times', description: 'With automated DM flows' },
+  { value: '24/7', label: 'Always-on engagement', description: 'Never miss a lead' },
+  { value: '0', label: 'Code required', description: 'Visual drag-and-drop builder' },
+  { value: '5 min', label: 'Setup time', description: 'Get started instantly' },
 ];
 
 const resources = [
@@ -161,22 +158,21 @@ const resources = [
   },
 ];
 
-const trustedBy = [
-  'GrowthCo', 'MediaHub', 'CreatorPro', 'SocialFirst', 'EngageIQ',
+const earlyAdopterBenefits = [
+  'Lock in early-bird pricing forever',
+  'Direct access to founders',
+  'Shape the product roadmap',
+  'Priority support',
 ];
 
-const testimonials = [
+const whyChooseUs = [
   {
-    quote: 'Chatrist has completely transformed how we engage with our audience. Our response rate increased by 300% in just one month.',
-    author: 'Sarah L.',
-    role: 'Social Media Manager',
-    company: 'GrowthCo',
+    title: 'Built by Creators, for Creators',
+    description: 'We understand the pain of manually responding to hundreds of DMs. Chatrist was born from our own frustration.',
   },
   {
-    quote: 'The visual flow builder is incredible. We set up complex automations in minutes that used to take hours of manual work.',
-    author: 'James K.',
-    role: 'Content Creator',
-    company: 'CreatorPro',
+    title: 'Privacy-First Approach',
+    description: 'Your data stays yours. We never sell or share your information with third parties.',
   },
 ];
 
@@ -297,7 +293,7 @@ export default function LandingPage() {
             <div className="mb-8 inline-flex items-center gap-2 rounded-full bg-orange-50 border border-orange-200/60 px-5 py-2 text-sm">
               <Sparkles className="h-4 w-4 text-orange-500" />
               <span className="text-orange-700 font-medium">
-                Trusted by 1,000+ creators and businesses
+                Now in Early Access — Join our founding members
               </span>
             </div>
 
@@ -401,8 +397,8 @@ export default function LandingPage() {
         </motion.div>
       </section>
 
-      {/* Trusted By Section */}
-      <section className="py-12 border-y border-gray-100 bg-gray-50/50">
+      {/* Early Adopter Section */}
+      <section className="py-12 border-y border-gray-100 bg-gradient-to-r from-orange-50 via-pink-50 to-violet-50">
         <div className="container mx-auto px-4 lg:px-8">
           <motion.div
             initial="hidden"
@@ -411,14 +407,18 @@ export default function LandingPage() {
             variants={fadeInUp}
             className="text-center"
           >
-            <p className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-8">
-              Trusted by leading brands
+            <p className="text-sm font-medium text-orange-600 uppercase tracking-wider mb-4">
+              Be an Early Adopter
             </p>
-            <div className="flex flex-wrap items-center justify-center gap-x-12 gap-y-4">
-              {trustedBy.map((brand) => (
-                <span key={brand} className="text-xl font-bold text-gray-300 hover:text-gray-400 transition-colors">
-                  {brand}
-                </span>
+            <p className="text-gray-600 mb-6 max-w-xl mx-auto">
+              Join our founding community and help shape the future of Instagram automation
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-4">
+              {earlyAdopterBenefits.map((benefit) => (
+                <div key={benefit} className="flex items-center gap-2 bg-white rounded-full px-4 py-2 shadow-sm border border-gray-100">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  <span className="text-sm font-medium text-gray-700">{benefit}</span>
+                </div>
               ))}
             </div>
           </motion.div>
@@ -729,7 +729,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Social Proof / Testimonials */}
+      {/* Why Choose Us Section */}
       <section className="py-20 lg:py-28 bg-gray-50/50">
         <div className="container mx-auto px-4 lg:px-8">
           <motion.div
@@ -740,17 +740,17 @@ export default function LandingPage() {
             className="text-center mb-16"
           >
             <p className="text-sm font-semibold text-orange-500 uppercase tracking-wider mb-4">
-              Testimonials
+              Why Chatrist
             </p>
             <h2 className="text-3xl sm:text-4xl font-bold text-gray-900">
-              See what our customers say
+              Built different, on purpose
             </h2>
           </motion.div>
 
           <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-            {testimonials.map((t, index) => (
+            {whyChooseUs.map((item, index) => (
               <motion.div
-                key={t.author}
+                key={item.title}
                 initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
@@ -758,28 +758,33 @@ export default function LandingPage() {
               >
                 <Card className="bg-white border-gray-100 rounded-2xl h-full">
                   <CardContent className="p-8">
-                    <div className="flex gap-1 mb-4">
-                      {[1, 2, 3, 4, 5].map((i) => (
-                        <Star key={i} className="h-5 w-5 text-amber-400 fill-amber-400" />
-                      ))}
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-pink-500 mb-4">
+                      <Sparkles className="h-6 w-6 text-white" />
                     </div>
-                    <p className="text-gray-700 leading-relaxed">
-                      &ldquo;{t.quote}&rdquo;
+                    <h3 className="text-xl font-semibold text-gray-900 mb-3">{item.title}</h3>
+                    <p className="text-gray-600 leading-relaxed">
+                      {item.description}
                     </p>
-                    <div className="mt-6 flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-full bg-gradient-to-br from-orange-400 to-pink-500 flex items-center justify-center text-white font-semibold text-sm">
-                        {t.author.split(' ').map(n => n[0]).join('')}
-                      </div>
-                      <div>
-                        <p className="font-semibold text-gray-900 text-sm">{t.author}</p>
-                        <p className="text-xs text-gray-500">{t.role} at {t.company}</p>
-                      </div>
-                    </div>
                   </CardContent>
                 </Card>
               </motion.div>
             ))}
           </div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="mt-12 text-center"
+          >
+            <p className="text-gray-500 mb-4">We&apos;re a small team with big ambitions. Have questions?</p>
+            <Link href="/contact">
+              <Button variant="outline" className="rounded-full">
+                Talk to the founders
+                <ArrowRight className="h-4 w-4 ml-1" />
+              </Button>
+            </Link>
+          </motion.div>
         </div>
       </section>
 
@@ -849,8 +854,8 @@ export default function LandingPage() {
               It&apos;s time to be a better marketer
             </h2>
             <p className="mt-6 text-lg text-white/80 max-w-2xl mx-auto">
-              Join thousands of creators and businesses using Chatrist to scale their
-              Instagram outreach. Start your free trial today.
+              Be among the first to experience the future of Instagram engagement.
+              Early adopters get exclusive benefits and lifetime discounts.
             </p>
             <div className="mt-10">
               <Link href="/register">
