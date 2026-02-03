@@ -3,7 +3,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 /**
  * GET /api/instagram/connect
- * Redirects user to Instagram OAuth authorization page
+ * Redirects user to Instagram Business Login OAuth authorization page
  */
 export async function GET() {
   const supabase = createSupabaseServerClient();
@@ -25,23 +25,23 @@ export async function GET() {
     );
   }
 
-  // Instagram OAuth scopes for Graph API
-  // For Instagram Graph API, we need to go through Facebook OAuth
+  // Instagram Business Login scopes
   const scopes = [
-    'instagram_basic',
-    'instagram_manage_messages',
-    'instagram_manage_comments',
-    'pages_show_list',
-    'pages_read_engagement',
+    'instagram_business_basic',
+    'instagram_business_manage_messages',
+    'instagram_business_manage_comments',
+    'instagram_business_content_publish',
+    'instagram_business_manage_insights',
   ].join(',');
 
-  // Build Facebook OAuth URL (Instagram Graph API uses Facebook OAuth)
-  const authUrl = new URL('https://www.facebook.com/v18.0/dialog/oauth');
+  // Build Instagram OAuth URL (Direct Instagram Business Login)
+  const authUrl = new URL('https://www.instagram.com/oauth/authorize');
   authUrl.searchParams.set('client_id', clientId);
   authUrl.searchParams.set('redirect_uri', redirectUri);
   authUrl.searchParams.set('scope', scopes);
   authUrl.searchParams.set('response_type', 'code');
   authUrl.searchParams.set('state', user.id); // Pass user ID in state for security
+  authUrl.searchParams.set('force_reauth', 'true'); // Force re-authentication
 
   return NextResponse.redirect(authUrl.toString());
 }

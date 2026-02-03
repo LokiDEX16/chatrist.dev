@@ -11,31 +11,31 @@ function getSupabaseAdmin() {
   return createClient(supabaseUrl, supabaseServiceKey);
 }
 
-interface FacebookTokenResponse {
+interface InstagramTokenResponse {
+  access_token: string;
+  user_id: number;
+}
+
+interface InstagramLongLivedTokenResponse {
   access_token: string;
   token_type: string;
   expires_in: number;
 }
 
-interface FacebookPage {
-  id: string;
-  name: string;
-  access_token: string;
-  instagram_business_account?: {
-    id: string;
-  };
-}
-
-interface InstagramAccount {
+interface InstagramUserProfile {
   id: string;
   username: string;
+  account_type?: string;
   profile_picture_url?: string;
   name?: string;
+  followers_count?: number;
+  follows_count?: number;
+  media_count?: number;
 }
 
 /**
  * GET /api/instagram/callback
- * Handles the OAuth callback from Facebook/Instagram
+ * Handles the OAuth callback from Instagram Business Login
  */
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -83,15 +83,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(redirectUrl.toString());
     }
 
-    // Step 1: Exchange code for short-lived access token
+    // Step 1: Exchange code for short-lived access token (Instagram Business Login)
     const tokenResponse = await fetch(
-      'https://graph.facebook.com/v18.0/oauth/access_token',
+      'https://api.instagram.com/oauth/access_token',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           client_id: clientId,
           client_secret: clientSecret,
+          grant_type: 'authorization_code',
           redirect_uri: `${APP_URL}/api/instagram/callback`,
           code,
         }),
@@ -100,117 +101,85 @@ export async function GET(request: NextRequest) {
 
     if (!tokenResponse.ok) {
       const errorData = await tokenResponse.json();
-      throw new Error(errorData.error?.message || 'Failed to exchange code for token');
+      console.error('Token exchange error:', errorData);
+      throw new Error(errorData.error_message || 'Failed to exchange code for token');
     }
 
-    const tokenData: FacebookTokenResponse = await tokenResponse.json();
+    const tokenData: InstagramTokenResponse = await tokenResponse.json();
 
-    // Step 2: Get long-lived access token
+    // Step 2: Exchange short-lived token for long-lived token
     const longLivedTokenResponse = await fetch(
-      `https://graph.facebook.com/v18.0/oauth/access_token?` +
+      `https://graph.instagram.com/access_token?` +
         new URLSearchParams({
-          grant_type: 'fb_exchange_token',
-          client_id: clientId,
+          grant_type: 'ig_exchange_token',
           client_secret: clientSecret,
-          fb_exchange_token: tokenData.access_token,
+          access_token: tokenData.access_token,
         })
     );
 
     if (!longLivedTokenResponse.ok) {
       const errorData = await longLivedTokenResponse.json();
+      console.error('Long-lived token error:', errorData);
       throw new Error(errorData.error?.message || 'Failed to get long-lived token');
     }
 
-    const longLivedTokenData: FacebookTokenResponse = await longLivedTokenResponse.json();
+    const longLivedTokenData: InstagramLongLivedTokenResponse = await longLivedTokenResponse.json();
 
-    // Step 3: Get Facebook pages with Instagram accounts
-    const pagesResponse = await fetch(
-      `https://graph.facebook.com/v18.0/me/accounts?` +
+    // Step 3: Get Instagram user profile
+    const profileResponse = await fetch(
+      `https://graph.instagram.com/v21.0/me?` +
         new URLSearchParams({
-          fields: 'id,name,access_token,instagram_business_account',
+          fields: 'id,username,account_type,profile_picture_url,name,followers_count,follows_count,media_count',
           access_token: longLivedTokenData.access_token,
         })
     );
 
-    if (!pagesResponse.ok) {
-      throw new Error('Failed to fetch Facebook pages');
+    if (!profileResponse.ok) {
+      const errorData = await profileResponse.json();
+      console.error('Profile fetch error:', errorData);
+      throw new Error('Failed to fetch Instagram profile');
     }
 
-    const pagesData = await pagesResponse.json();
-    const pages: FacebookPage[] = pagesData.data || [];
+    const profile: InstagramUserProfile = await profileResponse.json();
 
-    // Find pages with Instagram business accounts
-    const pagesWithInstagram = pages.filter((page) => page.instagram_business_account);
+    // Calculate token expiry (long-lived tokens last ~60 days)
+    const tokenExpiry = new Date();
+    tokenExpiry.setSeconds(tokenExpiry.getSeconds() + (longLivedTokenData.expires_in || 5184000));
 
-    if (pagesWithInstagram.length === 0) {
-      redirectUrl.searchParams.set('error', 'No Instagram Business account found. Please connect an Instagram Business or Creator account to a Facebook Page.');
+    // Step 4: Save or update Instagram account in database using service role to bypass RLS
+    const adminClient = getSupabaseAdmin();
+    const { data: upsertData, error: upsertError } = await adminClient
+      .from('instagram_accounts')
+      .upsert(
+        {
+          user_id: user.id,
+          ig_user_id: profile.id,
+          username: profile.username,
+          profile_pic_url: profile.profile_picture_url || null,
+          profile_picture_url: profile.profile_picture_url || null,
+          name: profile.name || profile.username,
+          access_token: longLivedTokenData.access_token,
+          token_expiry: tokenExpiry.toISOString(),
+          is_active: true,
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: 'ig_user_id',
+          ignoreDuplicates: false,
+        }
+      )
+      .select();
+
+    if (upsertError) {
+      console.error('Failed to save Instagram account:', upsertError);
+      redirectUrl.searchParams.set('error', 'Failed to save Instagram account');
       return NextResponse.redirect(redirectUrl.toString());
     }
 
-    // Step 4: Get Instagram account details and save
-    let connectedAccounts = 0;
-
-    for (const page of pagesWithInstagram) {
-      if (!page.instagram_business_account) continue;
-
-      // Get Instagram account details
-      const igResponse = await fetch(
-        `https://graph.facebook.com/v18.0/${page.instagram_business_account.id}?` +
-          new URLSearchParams({
-            fields: 'id,username,profile_picture_url,name',
-            access_token: page.access_token,
-          })
-      );
-
-      if (!igResponse.ok) {
-        console.error(`Failed to fetch Instagram account for page ${page.name}:`, await igResponse.text());
-        continue;
-      }
-
-      const igAccount: InstagramAccount = await igResponse.json();
-
-      // Calculate token expiry (long-lived tokens last ~60 days)
-      const tokenExpiry = new Date();
-      tokenExpiry.setSeconds(tokenExpiry.getSeconds() + (longLivedTokenData.expires_in || 5184000));
-
-      // Save or update Instagram account in database using service role to bypass RLS
-      const adminClient = getSupabaseAdmin();
-      const { data: upsertData, error: upsertError } = await adminClient
-        .from('instagram_accounts')
-        .upsert(
-          {
-            user_id: user.id,
-            ig_user_id: igAccount.id,
-            username: igAccount.username,
-            profile_pic_url: igAccount.profile_picture_url || null,
-            profile_picture_url: igAccount.profile_picture_url || null,
-            name: igAccount.name,
-            access_token: page.access_token, // Use page token for API calls
-            token_expiry: tokenExpiry.toISOString(),
-            is_active: true,
-            updated_at: new Date().toISOString(),
-          },
-          {
-            onConflict: 'ig_user_id',
-            ignoreDuplicates: false,
-          }
-        )
-        .select();
-
-      if (upsertError) {
-        console.error('Failed to save Instagram account:', upsertError);
-      } else {
-        console.log('Instagram account saved:', upsertData);
-        connectedAccounts++;
-      }
-    }
-
-    if (connectedAccounts > 0) {
-      redirectUrl.searchParams.set('success', 'true');
-      redirectUrl.searchParams.set('account', pagesWithInstagram[0].instagram_business_account?.id || '');
-    } else {
-      redirectUrl.searchParams.set('error', 'Failed to save Instagram account');
-    }
+    console.log('Instagram account saved:', upsertData);
+    redirectUrl.searchParams.set('success', 'true');
+    redirectUrl.searchParams.set('account', profile.id);
+    redirectUrl.searchParams.set('username', profile.username);
 
     return NextResponse.redirect(redirectUrl.toString());
   } catch (err) {
