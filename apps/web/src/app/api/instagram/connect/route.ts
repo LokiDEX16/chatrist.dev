@@ -24,13 +24,11 @@ export async function GET() {
     );
   }
 
-  // Instagram Business Login scopes
+  // Instagram Business Login scopes (from Meta Developer Console)
   const scopes = [
     'instagram_business_basic',
+    'instagram_manage_comments',
     'instagram_business_manage_messages',
-    'instagram_business_manage_comments',
-    'instagram_business_content_publish',
-    'instagram_business_manage_insights',
   ].join(',');
 
   // Build Instagram Business Login OAuth URL
