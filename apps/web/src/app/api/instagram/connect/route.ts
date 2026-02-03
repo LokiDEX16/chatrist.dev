@@ -12,15 +12,15 @@ export async function GET() {
   const { data: { user }, error } = await supabase.auth.getUser();
 
   if (error || !user) {
-    return NextResponse.redirect(new URL('/login', process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'));
+    return NextResponse.redirect(new URL('/login', process.env.NEXT_PUBLIC_APP_URL || 'https://chatrist-dev-web.vercel.app'));
   }
 
   const clientId = process.env.INSTAGRAM_CLIENT_ID;
-  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/instagram/callback`;
+  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || 'https://chatrist-dev-web.vercel.app'}/api/instagram/callback`;
 
   if (!clientId) {
     return NextResponse.redirect(
-      new URL('/dashboard/instagram?error=Instagram API not configured', process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000')
+      new URL('/dashboard/instagram?error=Instagram API not configured', process.env.NEXT_PUBLIC_APP_URL || 'https://chatrist-dev-web.vercel.app')
     );
   }
 
