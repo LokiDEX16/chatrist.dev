@@ -35,10 +35,12 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    console.log('Webhook received:', JSON.stringify(body, null, 2));
 
     const { object, entry } = body;
 
     if (object !== 'instagram') {
+      console.log('Ignoring non-instagram webhook:', object);
       return NextResponse.json({ received: true }, { status: 200 });
     }
 
@@ -54,7 +56,12 @@ export async function POST(request: NextRequest) {
         .eq('ig_user_id', igUserId)
         .single();
 
-      if (!account) continue;
+      if (!account) {
+        console.log('No account found for ig_user_id:', igUserId);
+        continue;
+      }
+
+      console.log('Found account:', account.id, 'for ig_user_id:', igUserId);
 
       // Find active campaigns for this Instagram account
       const { data: activeCampaigns } = await supabase
@@ -63,7 +70,12 @@ export async function POST(request: NextRequest) {
         .eq('instagram_account_id', account.id)
         .eq('status', 'ACTIVE');
 
-      if (!activeCampaigns || activeCampaigns.length === 0) continue;
+      if (!activeCampaigns || activeCampaigns.length === 0) {
+        console.log('No active campaigns for account:', account.id);
+        continue;
+      }
+
+      console.log('Found', activeCampaigns.length, 'active campaigns');
 
       // Process messaging events (DMs, story replies)
       if (event.messaging) {

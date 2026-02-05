@@ -294,14 +294,15 @@ async function replyToComment(
   message: string
 ): Promise<{ success: boolean; error?: string; commentId?: string }> {
   try {
+    // Use graph.instagram.com for Instagram Business Login tokens
     const response = await fetch(
-      `https://graph.facebook.com/v18.0/${commentId}/replies`,
+      `https://graph.instagram.com/${commentId}/replies`,
       {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: JSON.stringify({
+        body: new URLSearchParams({
           message: message.slice(0, 1000),
           access_token: igAccount.access_token,
         }),
@@ -310,6 +311,7 @@ async function replyToComment(
 
     if (!response.ok) {
       const errorData = await response.json();
+      console.error('Comment reply failed:', errorData);
       return {
         success: false,
         error: errorData.error?.message || 'Failed to reply to comment'
@@ -319,6 +321,7 @@ async function replyToComment(
     const data = await response.json();
     return { success: true, commentId: data.id };
   } catch (error) {
+    console.error('Comment reply error:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Network error'
@@ -627,7 +630,7 @@ async function sendInstagramDM(
 ): Promise<{ success: boolean; error?: string; messageId?: string }> {
   try {
     const response = await fetch(
-      `https://graph.facebook.com/v18.0/${igAccount.ig_user_id}/messages`,
+      `https://graph.instagram.com/v21.0/${igAccount.ig_user_id}/messages`,
       {
         method: 'POST',
         headers: {
@@ -636,7 +639,7 @@ async function sendInstagramDM(
         },
         body: JSON.stringify({
           recipient: { id: recipientId },
-          message: { text: message.slice(0, 1000) }, // Max 1000 chars
+          message: { text: message.slice(0, 1000) },
         }),
       }
     );
@@ -719,7 +722,7 @@ async function upsertLead(
     // Check if lead exists
     const { data: existingLead } = await supabase
       .from('leads')
-      .select('id')
+      .select('id, total_interactions')
       .eq('user_id', campaign.user_id)
       .eq('ig_user_id', trigger.ig_user_id)
       .single();
@@ -730,7 +733,7 @@ async function upsertLead(
         .from('leads')
         .update({
           last_interaction_at: new Date().toISOString(),
-          total_interactions: supabase.rpc('increment', { x: 1 }),
+          total_interactions: (existingLead.total_interactions || 0) + 1,
         })
         .eq('id', existingLead.id);
 
@@ -758,7 +761,6 @@ async function upsertLead(
       return null;
     }
 
-    await updateAnalytics(supabase, campaign.id, { leadsCreated: 1 });
     return newLead?.id || null;
   } catch (error) {
     console.error('Error upserting lead:', error);
@@ -773,25 +775,51 @@ async function checkRateLimits(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   campaign: Campaign
 ): Promise<boolean> {
-  const { data, error } = await supabase.rpc('check_rate_limit', {
-    p_campaign_id: campaign.id,
-    p_hourly_limit: campaign.hourly_limit,
-    p_daily_limit: campaign.daily_limit,
-  });
+  try {
+    const now = new Date();
+    const hourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+    const todayStart = new Date(now.toISOString().split('T')[0] + 'T00:00:00Z').toISOString();
 
-  return !error && data === true;
+    // Count triggers in last hour
+    const { count: hourlyCount } = await supabase
+      .from('triggers')
+      .select('id', { count: 'exact', head: true })
+      .eq('campaign_id', campaign.id)
+      .in('status', ['COMPLETED', 'PROCESSING'])
+      .gte('created_at', hourAgo);
+
+    if ((hourlyCount || 0) >= campaign.hourly_limit) {
+      return false;
+    }
+
+    // Count triggers today
+    const { count: dailyCount } = await supabase
+      .from('triggers')
+      .select('id', { count: 'exact', head: true })
+      .eq('campaign_id', campaign.id)
+      .in('status', ['COMPLETED', 'PROCESSING'])
+      .gte('created_at', todayStart);
+
+    if ((dailyCount || 0) >= campaign.daily_limit) {
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Rate limit check failed:', error);
+    // Allow processing if rate limit check fails
+    return true;
+  }
 }
 
 /**
- * Increment rate limit counters
+ * Increment rate limit counters (no-op, rate limits checked via query)
  */
 async function incrementRateLimits(
-  supabase: ReturnType<typeof getSupabaseAdmin>,
-  campaign: Campaign
+  _supabase: ReturnType<typeof getSupabaseAdmin>,
+  _campaign: Campaign
 ): Promise<void> {
-  await supabase.rpc('increment_rate_limit', {
-    p_campaign_id: campaign.id,
-  });
+  // Rate limits are now checked by counting triggers directly
 }
 
 /**
@@ -833,42 +861,46 @@ async function updateAnalytics(
     flowDropoffs?: number;
   }
 ): Promise<void> {
-  const today = new Date().toISOString().split('T')[0];
+  try {
+    const today = new Date().toISOString().split('T')[0];
 
-  // Upsert analytics record
-  const { data: existing } = await supabase
-    .from('campaign_analytics')
-    .select('id')
-    .eq('campaign_id', campaignId)
-    .eq('date', today)
-    .single();
-
-  if (existing) {
-    // Update existing record
-    const updateFields: Record<string, unknown> = {};
-    if (updates.triggers) updateFields.trigger_count = supabase.rpc('increment', { x: updates.triggers });
-    if (updates.dmsSent) updateFields.dms_sent = supabase.rpc('increment', { x: updates.dmsSent });
-    if (updates.dmsDelivered) updateFields.dms_delivered = supabase.rpc('increment', { x: updates.dmsDelivered });
-    if (updates.dmsFailed) updateFields.dms_failed = supabase.rpc('increment', { x: updates.dmsFailed });
-    if (updates.flowCompletions) updateFields.flow_completions = supabase.rpc('increment', { x: updates.flowCompletions });
-    if (updates.flowDropoffs) updateFields.flow_dropoffs = supabase.rpc('increment', { x: updates.flowDropoffs });
-
-    await supabase
+    // Upsert analytics record
+    const { data: existing } = await supabase
       .from('campaign_analytics')
-      .update(updateFields)
-      .eq('id', existing.id);
-  } else {
-    // Insert new record
-    await supabase.from('campaign_analytics').insert({
-      campaign_id: campaignId,
-      date: today,
-      trigger_count: updates.triggers || 0,
-      dms_sent: updates.dmsSent || 0,
-      dms_delivered: updates.dmsDelivered || 0,
-      dms_failed: updates.dmsFailed || 0,
-      flow_completions: updates.flowCompletions || 0,
-      flow_dropoffs: updates.flowDropoffs || 0,
-    });
+      .select('id, trigger_count, dms_sent, dms_delivered, dms_failed, flow_completions, flow_dropoffs')
+      .eq('campaign_id', campaignId)
+      .eq('date', today)
+      .single();
+
+    if (existing) {
+      // Update existing record by incrementing values
+      await supabase
+        .from('campaign_analytics')
+        .update({
+          trigger_count: (existing.trigger_count || 0) + (updates.triggers || 0),
+          dms_sent: (existing.dms_sent || 0) + (updates.dmsSent || 0),
+          dms_delivered: (existing.dms_delivered || 0) + (updates.dmsDelivered || 0),
+          dms_failed: (existing.dms_failed || 0) + (updates.dmsFailed || 0),
+          flow_completions: (existing.flow_completions || 0) + (updates.flowCompletions || 0),
+          flow_dropoffs: (existing.flow_dropoffs || 0) + (updates.flowDropoffs || 0),
+        })
+        .eq('id', existing.id);
+    } else {
+      // Insert new record
+      await supabase.from('campaign_analytics').insert({
+        campaign_id: campaignId,
+        date: today,
+        trigger_count: updates.triggers || 0,
+        dms_sent: updates.dmsSent || 0,
+        dms_delivered: updates.dmsDelivered || 0,
+        dms_failed: updates.dmsFailed || 0,
+        flow_completions: updates.flowCompletions || 0,
+        flow_dropoffs: updates.flowDropoffs || 0,
+      });
+    }
+  } catch (error) {
+    // Don't fail the trigger if analytics update fails
+    console.error('Analytics update failed:', error);
   }
 }
 
