@@ -376,7 +376,7 @@ export default function CampaignsPage() {
                           size="sm"
                           className="w-full rounded-xl"
                           onClick={() => activateMutation.mutate(campaign.id)}
-                          disabled={activateMutation.isPending || !campaign.flowId}
+                          disabled={activateMutation.isPending}
                         >
                           <Play className="h-4 w-4" />
                           {campaign.status === 'DRAFT' ? 'Activate' : 'Resume'}
