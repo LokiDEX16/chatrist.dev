@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createClient } from '@supabase/supabase-js';
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://chatrist-dev-web.vercel.app';
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://chatrist-dev-web-git-main-lokeshs-projects-e389820e.vercel.app';
 
 // Service role client for bypassing RLS when saving Instagram accounts
 function getSupabaseAdmin() {

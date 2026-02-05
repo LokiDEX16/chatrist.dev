@@ -8,7 +8,7 @@ import { createClient } from '@supabase/supabase-js';
  */
 export async function GET() {
   const supabase = createSupabaseServerClient();
-  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://chatrist-dev-web.vercel.app';
+  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://chatrist-dev-web-git-main-lokeshs-projects-e389820e.vercel.app';
 
   // Check if user is authenticated
   const { data: { user }, error: authError } = await supabase.auth.getUser();
