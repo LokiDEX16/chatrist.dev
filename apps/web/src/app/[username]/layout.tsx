@@ -524,11 +524,44 @@ export default function UserLayout({ children }: { children: React.ReactNode }) 
                 <Bell className="h-5 w-5 text-gray-500" />
                 <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-orange-500" />
               </button>
-              <Avatar className="h-8 w-8 border border-[#CBD5E1]">
-                <AvatarFallback className="bg-gradient-to-br from-orange-400 to-pink-500 text-white font-medium text-xs">
-                  {userName.charAt(0).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="rounded-full focus:outline-none focus:ring-2 focus:ring-orange-200">
+                    <Avatar className="h-8 w-8 border border-[#CBD5E1] cursor-pointer">
+                      <AvatarFallback className="bg-gradient-to-br from-orange-400 to-pink-500 text-white font-medium text-xs">
+                        {userName.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  side="bottom"
+                  className="w-56 rounded-xl"
+                >
+                  <DropdownMenuLabel className="font-normal">
+                    <div className="flex flex-col space-y-1">
+                      <p className="text-sm font-medium">{userName}</p>
+                      <p className="text-xs text-muted-foreground">{userEmail}</p>
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild className="rounded-lg cursor-pointer">
+                    <Link href={`/${actualUsername}/settings`}>
+                      <Settings className="mr-2 h-4 w-4" />
+                      Settings
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={handleSignOut}
+                    className="rounded-lg cursor-pointer text-destructive focus:text-destructive"
+                  >
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Sign out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </header>
 
