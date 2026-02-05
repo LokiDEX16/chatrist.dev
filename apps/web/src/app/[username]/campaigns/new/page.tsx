@@ -112,25 +112,22 @@ export default function NewCampaignPage() {
       .map((k) => k.trim())
       .filter(Boolean);
 
-    // Build trigger config with simple action settings if using simple mode
-    const triggerConfig: Record<string, unknown> = {
-      keywords: keywords.length > 0 ? keywords : undefined,
-      matchAll: false,
-      caseSensitive: false,
-    };
-
-    if (automationMode === 'simple' && simpleMessage) {
-      triggerConfig.simpleAction = simpleAction;
-      triggerConfig.simpleMessage = simpleMessage;
-    }
-
     createMutation.mutate({
       name: formData.name,
       description: formData.description || undefined,
       instagramAccountId: formData.instagramAccountId || undefined,
       triggerType: formData.triggerType,
       flowId: automationMode === 'flow' ? formData.flowId || undefined : undefined,
-      triggerConfig,
+      triggerConfig: {
+        keywords: keywords.length > 0 ? keywords : undefined,
+        matchAll: false,
+        caseSensitive: false,
+        // Store simple action settings for backend processing
+        ...(automationMode === 'simple' && simpleMessage ? {
+          simpleAction,
+          simpleMessage,
+        } : {}),
+      } as CreateCampaignInput['triggerConfig'],
       hourlyLimit: formData.hourlyLimit,
       dailyLimit: formData.dailyLimit,
     });
