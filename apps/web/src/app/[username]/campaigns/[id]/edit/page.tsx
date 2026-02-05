@@ -102,14 +102,15 @@ export default function EditCampaignPage() {
   // Update form when campaign loads
   useEffect(() => {
     if (campaign) {
+      const keywords = campaign.triggerConfig?.keywords;
       setFormData({
-        name: campaign.name,
+        name: campaign.name || '',
         description: campaign.description || '',
-        triggerType: campaign.triggerType,
+        triggerType: campaign.triggerType || 'COMMENT',
         flowId: campaign.flowId || '',
-        keywords: campaign.triggerConfig?.keywords?.join(', ') || '',
-        hourlyLimit: campaign.hourlyLimit,
-        dailyLimit: campaign.dailyLimit,
+        keywords: Array.isArray(keywords) ? keywords.join(', ') : '',
+        hourlyLimit: campaign.hourlyLimit || 20,
+        dailyLimit: campaign.dailyLimit || 100,
       });
     }
   }, [campaign]);
@@ -261,14 +262,14 @@ export default function EditCampaignPage() {
             <div className="space-y-2">
               <Label>Flow</Label>
               <Select
-                value={formData.flowId}
-                onValueChange={(value) => setFormData({ ...formData, flowId: value })}
+                value={formData.flowId || 'none'}
+                onValueChange={(value) => setFormData({ ...formData, flowId: value === 'none' ? '' : value })}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select a flow" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">No flow selected</SelectItem>
+                  <SelectItem value="none">No flow selected</SelectItem>
                   {flows?.map((flow) => (
                     <SelectItem key={flow.id} value={flow.id}>
                       {flow.name}
