@@ -69,8 +69,7 @@ export default function NewCampaignPage() {
     queryKey: ['instagram-accounts'],
     queryFn: async () => {
       const response = await instagramApi.accounts();
-      const data = response.data as { accounts?: InstagramAccount[] };
-      return (data?.accounts || []) as InstagramAccount[];
+      return (response.data || []) as InstagramAccount[];
     },
   });
 
