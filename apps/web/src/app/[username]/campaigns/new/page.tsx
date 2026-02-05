@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, MessageCircle, Send, Workflow } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/select';
 import { campaignApi, flowApi, instagramApi } from '@/lib/api';
 import { useToast } from '@/components/ui/use-toast';
+import { cn } from '@/lib/utils';
 import type { CreateCampaignInput } from '@/lib/validations';
 
 interface InstagramAccount {
@@ -39,11 +40,18 @@ const triggerTypes = [
   { value: 'NEW_FOLLOWER', label: 'New Follower', description: 'Trigger when someone follows you' },
 ];
 
+type AutomationMode = 'simple' | 'flow';
+type SimpleAction = 'send_dm' | 'reply_comment';
+
 export default function NewCampaignPage() {
   const router = useRouter();
   const params = useParams();
   const username = params?.username as string;
   const { toast } = useToast();
+
+  const [automationMode, setAutomationMode] = useState<AutomationMode>('simple');
+  const [simpleAction, setSimpleAction] = useState<SimpleAction>('send_dm');
+  const [simpleMessage, setSimpleMessage] = useState('');
 
   const [formData, setFormData] = useState<{
     name: string;
@@ -104,17 +112,25 @@ export default function NewCampaignPage() {
       .map((k) => k.trim())
       .filter(Boolean);
 
+    // Build trigger config with simple action settings if using simple mode
+    const triggerConfig: Record<string, unknown> = {
+      keywords: keywords.length > 0 ? keywords : undefined,
+      matchAll: false,
+      caseSensitive: false,
+    };
+
+    if (automationMode === 'simple' && simpleMessage) {
+      triggerConfig.simpleAction = simpleAction;
+      triggerConfig.simpleMessage = simpleMessage;
+    }
+
     createMutation.mutate({
       name: formData.name,
       description: formData.description || undefined,
       instagramAccountId: formData.instagramAccountId || undefined,
       triggerType: formData.triggerType,
-      flowId: formData.flowId || undefined,
-      triggerConfig: {
-        keywords: keywords.length > 0 ? keywords : undefined,
-        matchAll: false,
-        caseSensitive: false,
-      },
+      flowId: automationMode === 'flow' ? formData.flowId || undefined : undefined,
+      triggerConfig,
       hourlyLimit: formData.hourlyLimit,
       dailyLimit: formData.dailyLimit,
     });
@@ -255,41 +271,156 @@ export default function NewCampaignPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Automation Flow</CardTitle>
+            <CardTitle>Automation Action</CardTitle>
             <CardDescription>
-              Select the flow to execute when triggered
+              Choose how to respond when triggered
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Flow</Label>
-              <Select
-                value={formData.flowId}
-                onValueChange={(value) => setFormData({ ...formData, flowId: value })}
+          <CardContent className="space-y-6">
+            {/* Mode Selection */}
+            <div className="grid grid-cols-2 gap-4">
+              <button
+                type="button"
+                onClick={() => setAutomationMode('simple')}
+                className={cn(
+                  'flex flex-col items-center gap-3 p-4 rounded-xl border-2 transition-all',
+                  automationMode === 'simple'
+                    ? 'border-purple-500 bg-purple-50'
+                    : 'border-gray-200 hover:border-gray-300'
+                )}
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a flow (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  {flows?.map((flow) => (
-                    <SelectItem key={flow.id} value={flow.id}>
-                      {flow.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {(!flows || flows.length === 0) && (
-                <p className="text-sm text-muted-foreground">
-                  No flows created yet.{' '}
-                  <Link href={`/${username}/flows/new`} className="text-primary hover:underline">
-                    Create a flow
-                  </Link>
-                </p>
-              )}
-              <p className="text-sm text-muted-foreground">
-                You can add a flow later, but the campaign cannot be activated without one.
-              </p>
+                <div className={cn(
+                  'h-12 w-12 rounded-xl flex items-center justify-center',
+                  automationMode === 'simple' ? 'bg-purple-500 text-white' : 'bg-gray-100 text-gray-500'
+                )}>
+                  <Send className="h-6 w-6" />
+                </div>
+                <div className="text-center">
+                  <p className={cn('font-medium', automationMode === 'simple' ? 'text-purple-700' : 'text-gray-700')}>
+                    Simple Action
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Send a quick DM or reply
+                  </p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAutomationMode('flow')}
+                className={cn(
+                  'flex flex-col items-center gap-3 p-4 rounded-xl border-2 transition-all',
+                  automationMode === 'flow'
+                    ? 'border-purple-500 bg-purple-50'
+                    : 'border-gray-200 hover:border-gray-300'
+                )}
+              >
+                <div className={cn(
+                  'h-12 w-12 rounded-xl flex items-center justify-center',
+                  automationMode === 'flow' ? 'bg-purple-500 text-white' : 'bg-gray-100 text-gray-500'
+                )}>
+                  <Workflow className="h-6 w-6" />
+                </div>
+                <div className="text-center">
+                  <p className={cn('font-medium', automationMode === 'flow' ? 'text-purple-700' : 'text-gray-700')}>
+                    Custom Flow
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Use advanced flow builder
+                  </p>
+                </div>
+              </button>
             </div>
+
+            {/* Simple Action Options */}
+            {automationMode === 'simple' && (
+              <div className="space-y-4 pt-4 border-t">
+                <div className="space-y-2">
+                  <Label>Action Type</Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setSimpleAction('send_dm')}
+                      className={cn(
+                        'flex items-center gap-2 p-3 rounded-lg border transition-all text-left',
+                        simpleAction === 'send_dm'
+                          ? 'border-purple-500 bg-purple-50 text-purple-700'
+                          : 'border-gray-200 hover:border-gray-300'
+                      )}
+                    >
+                      <Send className="h-4 w-4" />
+                      <span className="text-sm font-medium">Send DM</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSimpleAction('reply_comment')}
+                      className={cn(
+                        'flex items-center gap-2 p-3 rounded-lg border transition-all text-left',
+                        simpleAction === 'reply_comment'
+                          ? 'border-purple-500 bg-purple-50 text-purple-700'
+                          : 'border-gray-200 hover:border-gray-300'
+                      )}
+                    >
+                      <MessageCircle className="h-4 w-4" />
+                      <span className="text-sm font-medium">Reply to Comment</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="simpleMessage">
+                    {simpleAction === 'send_dm' ? 'DM Message' : 'Comment Reply'} *
+                  </Label>
+                  <Textarea
+                    id="simpleMessage"
+                    value={simpleMessage}
+                    onChange={(e) => setSimpleMessage(e.target.value)}
+                    placeholder={
+                      simpleAction === 'send_dm'
+                        ? "Hey {{username}}! Thanks for your interest. Here's more info..."
+                        : "Thanks for commenting, {{username}}! Check your DMs for more info."
+                    }
+                    rows={4}
+                    required={automationMode === 'simple'}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Use {'{{username}}'} to personalize with the user's name
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Custom Flow Selection */}
+            {automationMode === 'flow' && (
+              <div className="space-y-4 pt-4 border-t">
+                <div className="space-y-2">
+                  <Label>Select Flow</Label>
+                  <Select
+                    value={formData.flowId}
+                    onValueChange={(value) => setFormData({ ...formData, flowId: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a flow" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {flows?.map((flow) => (
+                        <SelectItem key={flow.id} value={flow.id}>
+                          {flow.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {(!flows || flows.length === 0) && (
+                    <p className="text-sm text-muted-foreground">
+                      No flows created yet.{' '}
+                      <Link href={`/${username}/flows/new`} className="text-primary hover:underline">
+                        Create a flow
+                      </Link>
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -330,7 +461,15 @@ export default function NewCampaignPage() {
           <Link href={`/${username}/campaigns`}>
             <Button variant="outline">Cancel</Button>
           </Link>
-          <Button type="submit" disabled={createMutation.isPending || !formData.instagramAccountId}>
+          <Button
+            type="submit"
+            disabled={
+              createMutation.isPending ||
+              !formData.instagramAccountId ||
+              (automationMode === 'simple' && !simpleMessage) ||
+              (automationMode === 'flow' && !formData.flowId)
+            }
+          >
             {createMutation.isPending ? 'Creating...' : 'Create Campaign'}
           </Button>
         </div>
