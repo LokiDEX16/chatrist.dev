@@ -69,6 +69,11 @@ interface Campaign {
   instagram_account_id: string;
   name: string;
   flow_id: string;
+  trigger_config: {
+    simpleAction?: 'send_dm' | 'reply_comment';
+    simpleMessage?: string;
+    keywords?: string[];
+  } | null;
   hourly_limit: number;
   daily_limit: number;
   status: string;
@@ -110,6 +115,7 @@ export async function processTrigger(triggerId: string): Promise<{ success: bool
           instagram_account_id,
           name,
           flow_id,
+          trigger_config,
           hourly_limit,
           daily_limit,
           status,
@@ -130,10 +136,15 @@ export async function processTrigger(triggerId: string): Promise<{ success: bool
 
     const campaign = trigger.campaigns as Campaign & { flows: Flow };
     const flow = campaign?.flows;
+    const triggerConfig = campaign?.trigger_config;
 
-    if (!flow || !flow.nodes || flow.nodes.length === 0) {
-      await updateTriggerStatus(supabase, triggerId, 'SKIPPED', 'No flow configured');
-      return { success: false, error: 'No flow configured for campaign' };
+    // Check if this is a simple action campaign (no flow needed)
+    const hasSimpleAction = triggerConfig?.simpleAction && triggerConfig?.simpleMessage;
+    const hasFlow = flow && flow.nodes && flow.nodes.length > 0;
+
+    if (!hasSimpleAction && !hasFlow) {
+      await updateTriggerStatus(supabase, triggerId, 'SKIPPED', 'No action configured');
+      return { success: false, error: 'No action configured for campaign' };
     }
 
     // 2. Check rate limits
@@ -167,10 +178,33 @@ export async function processTrigger(triggerId: string): Promise<{ success: bool
     // 5. Mark trigger as processing
     await updateTriggerStatus(supabase, triggerId, 'PROCESSING');
 
-    // 6. Execute flow
-    const result = await executeFlow(supabase, trigger, flow, igAccount, campaign);
+    // 6. Handle simple action (no flow needed)
+    if (hasSimpleAction && triggerConfig?.simpleMessage) {
+      const result = await executeSimpleAction(
+        supabase,
+        trigger,
+        igAccount,
+        campaign,
+        triggerConfig.simpleAction!,
+        triggerConfig.simpleMessage
+      );
 
-    // 7. Update trigger status based on result
+      if (result.success) {
+        await updateTriggerStatus(supabase, triggerId, 'COMPLETED');
+        await incrementRateLimits(supabase, campaign);
+        await updateAnalytics(supabase, campaign.id, { triggers: 1, dmsSent: 1, flowCompletions: 1 });
+      } else {
+        await updateTriggerStatus(supabase, triggerId, 'FAILED', result.error);
+        await updateAnalytics(supabase, campaign.id, { triggers: 1, dmsFailed: 1 });
+      }
+
+      return result;
+    }
+
+    // 7. Execute flow (if configured)
+    const result = await executeFlow(supabase, trigger, flow!, igAccount, campaign);
+
+    // 8. Update trigger status based on result
     if (result.success) {
       await updateTriggerStatus(supabase, triggerId, 'COMPLETED');
       await incrementRateLimits(supabase, campaign);
@@ -186,6 +220,109 @@ export async function processTrigger(triggerId: string): Promise<{ success: bool
     await updateTriggerStatus(getSupabaseAdmin(), triggerId, 'FAILED',
       error instanceof Error ? error.message : 'Unknown error');
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+}
+
+/**
+ * Execute a simple action (send DM or reply to comment)
+ */
+async function executeSimpleAction(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  trigger: Trigger,
+  igAccount: InstagramAccount,
+  campaign: Campaign,
+  action: 'send_dm' | 'reply_comment',
+  message: string
+): Promise<{ success: boolean; error?: string }> {
+  // Personalize the message
+  const personalizedMessage = personalizeMessage(message, trigger);
+
+  if (action === 'send_dm') {
+    // Send DM to the user
+    const result = await sendInstagramDM(igAccount, trigger.ig_user_id, personalizedMessage);
+
+    if (result.success) {
+      // Record the message
+      await supabase.from('messages').insert({
+        trigger_id: trigger.id,
+        campaign_id: campaign.id,
+        ig_user_id: trigger.ig_user_id,
+        content: personalizedMessage,
+        message_type: 'TEXT',
+        status: 'SENT',
+        ig_message_id: result.messageId,
+        sent_at: new Date().toISOString(),
+      });
+    }
+
+    return result;
+  } else if (action === 'reply_comment') {
+    // Reply to the comment
+    const commentId = trigger.source_id;
+    if (!commentId) {
+      return { success: false, error: 'No comment ID found' };
+    }
+
+    const result = await replyToComment(igAccount, commentId, personalizedMessage);
+
+    if (result.success) {
+      // Record the reply
+      await supabase.from('messages').insert({
+        trigger_id: trigger.id,
+        campaign_id: campaign.id,
+        ig_user_id: trigger.ig_user_id,
+        content: personalizedMessage,
+        message_type: 'COMMENT_REPLY',
+        status: 'SENT',
+        ig_message_id: result.commentId,
+        sent_at: new Date().toISOString(),
+      });
+    }
+
+    return result;
+  }
+
+  return { success: false, error: 'Unknown action type' };
+}
+
+/**
+ * Reply to an Instagram comment
+ */
+async function replyToComment(
+  igAccount: InstagramAccount,
+  commentId: string,
+  message: string
+): Promise<{ success: boolean; error?: string; commentId?: string }> {
+  try {
+    const response = await fetch(
+      `https://graph.facebook.com/v18.0/${commentId}/replies`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: message.slice(0, 1000),
+          access_token: igAccount.access_token,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      return {
+        success: false,
+        error: errorData.error?.message || 'Failed to reply to comment'
+      };
+    }
+
+    const data = await response.json();
+    return { success: true, commentId: data.id };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Network error'
+    };
   }
 }
 
