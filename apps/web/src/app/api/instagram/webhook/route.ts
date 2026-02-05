@@ -8,9 +8,17 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 /**
  * Webhook verification (GET) - Facebook sends a GET request to verify the webhook.
+ * Also handles comment polling when called with ?poll=true
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
+
+  // Comment polling mode: GET /api/instagram/webhook?poll=true
+  if (searchParams.get('poll') === 'true') {
+    return pollComments();
+  }
+
+  // Normal webhook verification
   const mode = searchParams.get('hub.mode');
   const token = searchParams.get('hub.verify_token');
   const challenge = searchParams.get('hub.challenge');
@@ -20,6 +28,211 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({ error: 'Verification failed' }, { status: 403 });
+}
+
+/**
+ * Poll Instagram for new comments and process them against active campaigns.
+ * Alternative to webhooks - works with any Instagram account type.
+ */
+async function pollComments() {
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  const results = {
+    triggersCreated: 0,
+    triggersProcessed: 0,
+    commentsScanned: 0,
+    mediaScanned: 0,
+    errors: [] as string[],
+  };
+
+  try {
+    // 1. Get all active COMMENT campaigns
+    const { data: campaigns } = await supabase
+      .from('campaigns')
+      .select('id, trigger_type, trigger_config, instagram_account_id')
+      .eq('trigger_type', 'COMMENT')
+      .eq('status', 'ACTIVE');
+
+    if (!campaigns || campaigns.length === 0) {
+      return NextResponse.json({ ...results, message: 'No active COMMENT campaigns' });
+    }
+
+    console.log(`Poll: Found ${campaigns.length} active COMMENT campaigns`);
+
+    // 2. Get Instagram accounts
+    const accountIds = [...new Set(campaigns.map((c) => c.instagram_account_id))];
+    const { data: accounts } = await supabase
+      .from('instagram_accounts')
+      .select('id, ig_user_id, access_token, username')
+      .in('id', accountIds);
+
+    if (!accounts || accounts.length === 0) {
+      return NextResponse.json({ ...results, message: 'No Instagram accounts found' });
+    }
+
+    const accountMap = new Map(accounts.map((a) => [a.id, a]));
+
+    // 3. Batch-fetch existing trigger source_ids for deduplication
+    const campaignIds = campaigns.map((c) => c.id);
+    const { data: existingTriggers } = await supabase
+      .from('triggers')
+      .select('source_id, campaign_id')
+      .in('campaign_id', campaignIds)
+      .eq('type', 'COMMENT');
+
+    const processedComments = new Set(
+      (existingTriggers || []).map((t) => `${t.campaign_id}:${t.source_id}`)
+    );
+
+    // 4. Group campaigns by account
+    const campaignsByAccount = new Map<string, typeof campaigns>();
+    for (const campaign of campaigns) {
+      const list = campaignsByAccount.get(campaign.instagram_account_id) || [];
+      list.push(campaign);
+      campaignsByAccount.set(campaign.instagram_account_id, list);
+    }
+
+    // 5. For each account, fetch media and comments
+    for (const [accountId, accountCampaigns] of campaignsByAccount) {
+      const account = accountMap.get(accountId);
+      if (!account?.access_token) continue;
+
+      console.log(`Poll: Checking @${account.username}`);
+
+      // Fetch recent media
+      const mediaRes = await fetch(
+        `https://graph.instagram.com/${account.ig_user_id}/media?` +
+          new URLSearchParams({
+            fields: 'id,timestamp',
+            limit: '10',
+            access_token: account.access_token,
+          })
+      );
+
+      if (!mediaRes.ok) {
+        const err = await mediaRes.json().catch(() => ({}));
+        results.errors.push(`Media fetch failed: ${(err as Record<string, Record<string, string>>).error?.message || mediaRes.statusText}`);
+        continue;
+      }
+
+      const mediaData = await mediaRes.json();
+      const mediaItems = (mediaData.data || []) as Array<{ id: string }>;
+
+      for (const media of mediaItems) {
+        results.mediaScanned++;
+
+        // Filter campaigns relevant to this post
+        const relevant = accountCampaigns.filter((c) => {
+          const cfg = c.trigger_config as { postId?: string } | null;
+          return !cfg?.postId || cfg.postId === media.id;
+        });
+        if (relevant.length === 0) continue;
+
+        // Fetch comments
+        const commentsRes = await fetch(
+          `https://graph.instagram.com/${media.id}/comments?` +
+            new URLSearchParams({
+              fields: 'id,text,username,timestamp,from',
+              limit: '50',
+              access_token: account.access_token,
+            })
+        );
+
+        if (!commentsRes.ok) {
+          const err = await commentsRes.json().catch(() => ({}));
+          results.errors.push(`Comments fetch failed for ${media.id}: ${(err as Record<string, Record<string, string>>).error?.message || commentsRes.statusText}`);
+          continue;
+        }
+
+        const commentsData = await commentsRes.json();
+        const comments = (commentsData.data || []) as Array<{
+          id: string;
+          text?: string;
+          username?: string;
+          timestamp?: string;
+          from?: { id?: string; username?: string };
+        }>;
+
+        for (const comment of comments) {
+          results.commentsScanned++;
+          if (comment.username === account.username) continue; // Skip self
+
+          const commenterId = comment.from?.id || comment.username || '';
+          const commenterUsername = comment.username || comment.from?.username || 'unknown';
+
+          for (const campaign of relevant) {
+            const config = campaign.trigger_config as {
+              keywords?: string[];
+              caseSensitive?: boolean;
+            } | null;
+
+            // Deduplicate
+            const key = `${campaign.id}:${comment.id}`;
+            if (processedComments.has(key)) continue;
+
+            // Check keywords
+            if (config?.keywords && config.keywords.length > 0) {
+              const text = config.caseSensitive ? (comment.text || '') : (comment.text || '').toLowerCase();
+              const match = config.keywords.some((kw: string) => {
+                const k = config.caseSensitive ? kw : kw.toLowerCase();
+                return text.includes(k);
+              });
+              if (!match) continue;
+            }
+
+            console.log(`Poll: Match! "${comment.text}" by @${commenterUsername}`);
+
+            // Create trigger
+            const { data: newTrigger, error: insertErr } = await supabase
+              .from('triggers')
+              .insert({
+                campaign_id: campaign.id,
+                ig_user_id: commenterId,
+                ig_username: commenterUsername,
+                type: 'COMMENT',
+                source_id: comment.id,
+                source_text: comment.text || '',
+                metadata: { ...comment, media_id: media.id },
+                status: 'PENDING',
+              })
+              .select('id')
+              .single();
+
+            if (insertErr) {
+              results.errors.push(`Insert failed: ${insertErr.message}`);
+              continue;
+            }
+
+            processedComments.add(key);
+            results.triggersCreated++;
+
+            // Process immediately
+            if (newTrigger?.id) {
+              try {
+                const res = await processTrigger(newTrigger.id);
+                if (res.success) {
+                  results.triggersProcessed++;
+                  console.log(`Poll: Trigger ${newTrigger.id} processed OK`);
+                } else {
+                  results.errors.push(`Trigger ${newTrigger.id}: ${res.error}`);
+                }
+              } catch (err) {
+                results.errors.push(`Trigger ${newTrigger.id}: ${String(err)}`);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    console.log('Poll completed:', results);
+    return NextResponse.json(results);
+  } catch (error) {
+    console.error('Poll error:', error);
+    return NextResponse.json(
+      { ...results, error: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    );
+  }
 }
 
 /**
