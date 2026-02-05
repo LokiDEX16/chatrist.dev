@@ -6,9 +6,6 @@ const VERIFY_TOKEN = process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-// Queue to process triggers asynchronously (non-blocking)
-const triggerQueue: string[] = [];
-
 /**
  * Webhook verification (GET) - Facebook sends a GET request to verify the webhook.
  */
@@ -33,6 +30,9 @@ export async function GET(request: NextRequest) {
  * - new followers
  */
 export async function POST(request: NextRequest) {
+  // Request-scoped queue (not module-level to avoid race conditions in serverless)
+  const triggerQueue: string[] = [];
+
   try {
     const body = await request.json();
     console.log('Webhook received:', JSON.stringify(body, null, 2));
