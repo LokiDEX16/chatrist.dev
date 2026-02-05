@@ -426,60 +426,6 @@ export default function UserLayout({ children }: { children: React.ReactNode }) 
               </div>
             )}
 
-            {/* User Menu */}
-            <div className="px-3 py-2 border-t border-[#CBD5E1] bg-white">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    className={cn(
-                      'w-full justify-start gap-2 rounded-lg h-auto py-2 hover:bg-slate-50',
-                      sidebarCollapsed && 'justify-center px-2'
-                    )}
-                  >
-                    <Avatar className="h-7 w-7 border border-[#CBD5E1]">
-                      <AvatarFallback className="bg-orange-50 text-orange-600 font-medium text-xs">
-                        {userName.charAt(0).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                    {!sidebarCollapsed && (
-                      <div className="flex-1 text-left min-w-0">
-                        <p className="text-xs font-medium truncate text-[#0F172A]">
-                          {userName}
-                        </p>
-                      </div>
-                    )}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align={sidebarCollapsed ? 'center' : 'end'}
-                  side="top"
-                  className="w-56 rounded-xl"
-                >
-                  <DropdownMenuLabel className="font-normal">
-                    <div className="flex flex-col space-y-1">
-                      <p className="text-sm font-medium">{userName}</p>
-                      <p className="text-xs text-muted-foreground">{userEmail}</p>
-                    </div>
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild className="rounded-lg cursor-pointer">
-                    <Link href={`/${actualUsername}/settings`}>
-                      <Settings className="mr-2 h-4 w-4" />
-                      Settings
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={handleSignOut}
-                    className="rounded-lg cursor-pointer text-destructive focus:text-destructive"
-                  >
-                    <LogOut className="mr-2 h-4 w-4" />
-                    Sign out
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
           </div>
         </aside>
 
