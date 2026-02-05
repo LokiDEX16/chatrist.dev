@@ -43,10 +43,11 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch media from Instagram Graph API
+    // Use graph.instagram.com for Instagram Basic Display API (personal accounts)
     const mediaResponse = await fetch(
-      `https://graph.facebook.com/v18.0/${account.ig_user_id}/media?` +
+      `https://graph.instagram.com/${account.ig_user_id}/media?` +
         new URLSearchParams({
-          fields: 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count',
+          fields: 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp',
           limit: '25',
           access_token: account.access_token,
         })
