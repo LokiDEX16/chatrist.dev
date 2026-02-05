@@ -308,21 +308,25 @@ export const campaigns = {
     try {
       const user = await getCurrentUser();
 
-      // First, check if campaign can be activated using database function
-      const { data: checkResult, error: checkError } = await supabase
-        .rpc('can_activate_campaign', { campaign_id: id });
+      // Get the campaign to check if it can be activated
+      const { data: campaign, error: getError } = await supabase
+        .from('campaigns')
+        .select('*, flow:flows(id, name)')
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .single();
 
-      if (checkError) {
-        return { data: null, error: handleSupabaseError(checkError) };
+      if (getError) {
+        return { data: null, error: handleSupabaseError(getError) };
       }
 
-      const activationCheck = checkResult as { can_activate: boolean; errors: string[] };
-      if (!activationCheck.can_activate) {
+      // Basic validation - campaign needs an Instagram account
+      if (!campaign.instagram_account_id) {
         return {
           data: null,
           error: new ValidationError(
             'Campaign cannot be activated',
-            { activation: activationCheck.errors }
+            { activation: ['Campaign must have an Instagram account connected'] }
           ),
         };
       }
